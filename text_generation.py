@@ -3,7 +3,7 @@ from transformers import Cache
 from typing import List, Tuple, Dict
 
 def vanilla_edit(model, tokenizer, prompt: str, max_tokens: int) -> str:
-        """
+    """
     Perform vanilla (non-speculative) text generation.
 
     Args:
@@ -13,6 +13,7 @@ def vanilla_edit(model, tokenizer, prompt: str, max_tokens: int) -> str:
     Returns:
         str: The generated text.
     """
+    
     inputs = tokenizer(prompt, return_tensors="pt", padding=True, return_attention_mask=True).to("cuda")
     
     with torch.no_grad():
@@ -28,7 +29,7 @@ def vanilla_edit(model, tokenizer, prompt: str, max_tokens: int) -> str:
     return generated_text[len(prompt):]
 
 def speculative_edit(model, tokenizer, prompt: str, max_tokens: int, num_heads: int = 3, codebase_context: Dict[str, str] = None) -> str:
-        """
+    """
     Perform speculative text generation using multiple heads.
 
     Args:
