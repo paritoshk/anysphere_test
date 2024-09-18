@@ -1,61 +1,47 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from text_generation import vanilla_edit, speculative_edit
-from tqdm import tqdm
+from text_generation import vanilla_edit, speculative_edit, compare_methods
+from next_action_prediction import predict_next_action
+from perfect_edit import perfect_edit
+from bug_detection import detect_bugs
+from multi_hop_context import retrieve_multi_hop_context
 from torch.utils.tensorboard import SummaryWriter
 from typing import List, Tuple, Dict
-import time
-from difflib import SequenceMatcher
 
 def setup_tensorboard():
     return SummaryWriter()
 
-def compare_methods(model, tokenizer, prompt: str, max_tokens: int, writer, num_runs: int = 5) -> Dict[str, Dict[str, float]]:
-    results = {
-        "vanilla": {"times": [], "outputs": []},
-        "speculative": {"times": [], "outputs": [], "correct_speculations": []}
-    }
+def compare_methods(model, tokenizer, prompt: str, max_tokens: int, writer) -> Tuple[str, str, float, float, float]:
+    import time
+    from difflib import SequenceMatcher
 
-    for _ in tqdm(range(num_runs), desc="Comparing methods"):
-        # Vanilla edit
-        start_time = time.time()
-        vanilla_output = vanilla_edit(model, tokenizer, prompt, max_tokens)
-        vanilla_time = time.time() - start_time
-        results["vanilla"]["times"].append(vanilla_time)
-        results["vanilla"]["outputs"].append(vanilla_output)
+    start_time = time.time()
+    vanilla_output = vanilla_edit(model, tokenizer, prompt, max_tokens)
+    vanilla_time = time.time() - start_time
 
-        # Speculative edit
-        start_time = time.time()
-        speculative_output, correct_speculations = speculative_edit(model, tokenizer, prompt, max_tokens)
-        speculative_time = time.time() - start_time
-        results["speculative"]["times"].append(speculative_time)
-        results["speculative"]["outputs"].append(speculative_output)
-        results["speculative"]["correct_speculations"].append(correct_speculations)
+    start_time = time.time()
+    speculative_output, correct_speculations = speculative_edit(model, tokenizer, prompt, max_tokens)
+    speculative_time = time.time() - start_time
 
-    # Calculate averages and log to TensorBoard
-    for method in results:
-        avg_time = sum(results[method]["times"]) / num_runs
-        writer.add_scalar(f'{method.capitalize()}_Avg_Time', avg_time, max_tokens)
-        
-        if method == "speculative":
-            avg_correct_speculations = sum(results[method]["correct_speculations"]) / num_runs
-            writer.add_scalar('Avg_Correct_Speculations', avg_correct_speculations, max_tokens)
+    # Calculate similarity ratio
+    similarity = SequenceMatcher(None, vanilla_output, speculative_output).ratio()
 
-    # Calculate similarity
-    similarity = SequenceMatcher(None, results["vanilla"]["outputs"][-1], results["speculative"]["outputs"][-1]).ratio()
+    writer.add_scalar('Time_Difference', vanilla_time - speculative_time, max_tokens)
     writer.add_scalar('Output_Similarity', similarity, max_tokens)
+    writer.add_scalar('Correct_Speculations', correct_speculations, max_tokens)
 
-    return results
+    return vanilla_output, speculative_output, vanilla_time, speculative_time, similarity
 
 def main():
     # Load model and tokenizer
-    print("Loading model and tokenizer...")
-    model_name = "meta-llama/Llama-2-7b-chat-hf"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name).to("cuda")
+    model_path = "/workspace/llama3finetune/model"
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer.pad_token = tokenizer.eos_token  # Set pad token to eos token
+    model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16).cuda()
+    model.eval()
 
+    # Setup TensorBoard
     writer = setup_tensorboard()
-
 
     # Test prompt
     test_prompt = """Please add a single comment
@@ -89,26 +75,38 @@ def main():
 
     ```ts
     """
+
     max_tokens = 100
 
-    print("Starting comparison...")
-    results = compare_methods(model, tokenizer, test_prompt, max_tokens, writer)
+    # Compare vanilla and speculative editing
+    vanilla_output, speculative_output, vanilla_time, speculative_time, similarity = compare_methods(model, tokenizer, test_prompt, max_tokens, writer)
 
-    print("\nResults:")
-    for method in results:
-        avg_time = sum(results[method]["times"]) / len(results[method]["times"])
-        print(f"\n{method.capitalize()} Edit:")
-        print(f"  Average Time: {avg_time:.4f}s")
-        print(f"  Last Output: {results[method]['outputs'][-1]}")
-        
-        if method == "speculative":
-            avg_correct_speculations = sum(results[method]["correct_speculations"]) / len(results[method]["correct_speculations"])
-            print(f"  Average Correct Speculations: {avg_correct_speculations:.2f}")
+    print(f"Vanilla Edit (Time: {vanilla_time:.4f}s):")
+    print(vanilla_output)
 
-    similarity = SequenceMatcher(None, results["vanilla"]["outputs"][-1], results["speculative"]["outputs"][-1]).ratio()
-    print(f"\nOutput Similarity: {similarity:.4f}")
+    print(f"\nSpeculative Edit (Time: {speculative_time:.4f}s):")
+    print(speculative_output)
 
-    print("\nDetailed results have been logged to TensorBoard.")
+    print(f"\nTime difference: {vanilla_time - speculative_time:.4f}s")
+    print(f"Output similarity: {similarity:.4f}")
+
+    # Test next action prediction
+    next_action = predict_next_action(model, tokenizer, test_prompt)
+    print(f"\nPredicted next action: {next_action}")
+
+    # Test perfect edit
+    perfect_edit_result = perfect_edit(model, tokenizer, test_prompt, "Add a comment explaining the purpose of the Visualization function")
+    print(f"\nPerfect Edit result:\n{perfect_edit_result}")
+
+    # Test bug detection
+    bugs = detect_bugs(model, tokenizer, test_prompt)
+    print(f"\nDetected bugs:\n{bugs}")
+
+    # Test multi-hop context retrieval
+    context = retrieve_multi_hop_context(model, tokenizer, test_prompt, ["file1.ts", "file2.ts"])
+    print(f"\nRetrieved multi-hop context:\n{context}")
+
+    # Close the TensorBoard writer
     writer.close()
 
 if __name__ == "__main__":
