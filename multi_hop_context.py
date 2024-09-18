@@ -1,3 +1,7 @@
+from typing import List
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
 def retrieve_multi_hop_context(model, tokenizer, query: str, file_list: List[str]) -> str:
     context = ""
     for file in file_list:
