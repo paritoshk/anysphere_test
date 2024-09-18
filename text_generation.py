@@ -56,26 +56,18 @@ def speculative_edit(model, tokenizer, prompt: str, max_tokens: int, num_heads: 
     while total_tokens < max_tokens:
         with torch.no_grad():
             outputs = model(input_ids=inputs.input_ids, attention_mask=inputs.attention_mask)
-            logits = outputs.logits[:, -num_heads:]
+            logits = outputs.logits[:, -1, :]  # Only predict the next token
         
-        predicted_tokens = torch.argmax(logits, dim=-1)
-        mismatch_index = (predicted_tokens[0] != inputs.input_ids[0, -num_heads:]).nonzero(as_tuple=True)[0]
+        predicted_token = torch.argmax(logits, dim=-1)
+        generated_tokens.extend(predicted_token[0].tolist())
+        correct_speculations += 1
         
-        if len(mismatch_index) == 0:
-            generated_tokens.extend(predicted_tokens[0].tolist())
-            correct_speculations += num_heads
-            mismatch_index = num_heads
-        else:
-            mismatch_index = mismatch_index[0].item()
-            generated_tokens.extend(predicted_tokens[0, :mismatch_index].tolist())
-            correct_speculations += mismatch_index
-        
-        new_tokens = tokenizer.decode(predicted_tokens[0, :mismatch_index])
-        inputs = tokenizer(tokenizer.decode(inputs.input_ids[0]) + new_tokens, return_tensors="pt", padding=True, return_attention_mask=True).to("cuda")
+        new_token = tokenizer.decode(predicted_token[0])
+        inputs = tokenizer(tokenizer.decode(inputs.input_ids[0]) + new_token, return_tensors="pt", padding=True, return_attention_mask=True).to("cuda")
         
         total_tokens = len(generated_tokens)
         
-        if total_tokens >= max_tokens or predicted_tokens[0, mismatch_index-1].item() == tokenizer.eos_token_id:
+        if total_tokens >= max_tokens or predicted_token.item() == tokenizer.eos_token_id:
             break
     
     return tokenizer.decode(generated_tokens[:max_tokens]), correct_speculations
