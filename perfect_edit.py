@@ -10,8 +10,7 @@ async def perfect_edit_async(model, tokenizer, code: str, instruction: str) -> s
             inputs.input_ids,
             attention_mask=inputs.attention_mask,
             max_new_tokens=500,
-            do_sample=True,
-            temperature=0.7,
+            do_sample=False,
             pad_token_id=tokenizer.eos_token_id
         )
     

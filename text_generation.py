@@ -1,7 +1,6 @@
 import torch
 from transformers import Cache
 from typing import List, Tuple, Dict
-import time
 
 def vanilla_edit(model, tokenizer, prompt: str, max_tokens: int) -> str:
     """
@@ -53,12 +52,13 @@ def speculative_edit(model, tokenizer, prompt: str, max_tokens: int, num_heads: 
         inputs.input_ids = torch.cat([context_inputs.input_ids, inputs.input_ids], dim=1)
         inputs.attention_mask = torch.cat([context_inputs.attention_mask, inputs.attention_mask], dim=1)
     
-    cache = Cache()
+    past_key_values = None
     
     while total_tokens < max_tokens:
         with torch.no_grad():
-            outputs = model(input_ids=inputs.input_ids, attention_mask=inputs.attention_mask, past_key_values=cache.to_legacy_tuple())
+            outputs = model(input_ids=inputs.input_ids, attention_mask=inputs.attention_mask, past_key_values=past_key_values)
             logits = outputs.logits[:, -num_heads:]
+            past_key_values = outputs.past_key_values
         
         predicted_tokens = torch.argmax(logits, dim=-1)
         mismatch_index = (predicted_tokens[0] != inputs.input_ids[0, -num_heads:]).nonzero(as_tuple=True)[0]
@@ -74,7 +74,6 @@ def speculative_edit(model, tokenizer, prompt: str, max_tokens: int, num_heads: 
         inputs = tokenizer(tokenizer.decode(inputs.input_ids[0]) + new_tokens, return_tensors="pt", padding=True, return_attention_mask=True).to("cuda")
         
         total_tokens = len(generated_tokens)
-        cache.update(outputs.past_key_values)
         
         if total_tokens >= max_tokens:
             break
