@@ -8,6 +8,7 @@ def test_model():
     # Load model and tokenizer
     model = AutoModelForCausalLM.from_pretrained(model_path, device_map="auto", torch_dtype=torch.float16)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer.pad_token = tokenizer.eos_token  # Set pad token to eos token
 
     # Test prompt
     prompt = "Explain the concept of quantum computing in detailed applied physics terms. Assume the reader has a PhD level understanding of physics and mathematics."

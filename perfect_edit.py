@@ -1,4 +1,5 @@
 import asyncio
+import torch
 
 async def perfect_edit_async(model, tokenizer, code: str, instruction: str) -> str:
     prompt = f"Code:\n{code}\n\nInstruction: {instruction}\n\nEdited Code:"

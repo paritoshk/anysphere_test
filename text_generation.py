@@ -1,6 +1,7 @@
 import torch
 from transformers import Cache
 from typing import List, Tuple, Dict
+import time
 
 def vanilla_edit(model, tokenizer, prompt: str, max_tokens: int) -> str:
     """

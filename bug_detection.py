@@ -1,3 +1,6 @@
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
 def detect_bugs(model, tokenizer, code: str) -> str:
     prompt = f"Analyze the following code for potential bugs and suggest improvements:\n\n{code}\n\nBugs and Suggestions:"
     inputs = tokenizer(prompt, return_tensors="pt", padding=True, return_attention_mask=True).to("cuda")

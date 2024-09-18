@@ -15,6 +15,7 @@ def main():
     # Load model and tokenizer
     model_path = "/workspace/llama3finetune/model"
     tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer.pad_token = tokenizer.eos_token  # Set pad token to eos token
     model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16).cuda()
     model.eval()
 
