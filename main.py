@@ -1,129 +1,26 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from typing import List, Tuple, Dict
+from text_generation import vanilla_edit, speculative_edit, compare_methods
+from next_action_prediction import predict_next_action
+from perfect_edit import perfect_edit
+from bug_detection import detect_bugs
+from multi_hop_context import retrieve_multi_hop_context
 from torch.utils.tensorboard import SummaryWriter
 
-# Initialize TensorBoard writer
-writer = SummaryWriter()
+def setup_tensorboard():
+    return SummaryWriter()
 
-# Load the model and tokenizer
-model_path = "/workspace/llama3finetune/model"
-tokenizer = AutoTokenizer.from_pretrained(model_path)
-model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16).cuda()
+def main():
+    # Load model and tokenizer
+    model_path = "/workspace/llama3finetune/model"
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16).cuda()
+    model.eval()
 
-# Set the model to evaluation mode
-model.eval()
+    # Setup TensorBoard
+    writer = setup_tensorboard()
 
-def vanilla_edit(prompt: str, max_tokens: int) -> str:
-    """
-    Perform vanilla (non-speculative) text generation.
-
-    Args:
-        prompt (str): The input prompt for text generation.
-        max_tokens (int): Maximum number of tokens to generate.
-
-    Returns:
-        str: The generated text.
-    """
-    inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
-    
-    with torch.no_grad():
-        outputs = model.generate(
-            inputs.input_ids,
-            max_new_tokens=max_tokens,
-            do_sample=False,  # Use greedy decoding
-            pad_token_id=tokenizer.eos_token_id
-        )
-    
-    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return generated_text[len(prompt):]  # Return only the newly generated text
-
-def speculative_edit(prompt: str, max_tokens: int, num_heads: int = 3, codebase_context: Dict[str, str] = None) -> str:
-    """
-    Perform speculative text generation using multiple heads and codebase context.
-
-    Args:
-        prompt (str): The input prompt for text generation.
-        max_tokens (int): Maximum number of tokens to generate.
-        num_heads (int): Number of speculative heads to use.
-        codebase_context (Dict[str, str]): Additional context from the codebase.
-
-    Returns:
-        str: The generated text.
-    """
-    inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
-    input_length = inputs.input_ids.shape[1]
-    
-    generated_tokens: List[int] = []
-    total_tokens = 0
-    
-    # Incorporate codebase context if available
-    if codebase_context:
-        context_prompt = "\n".join([f"File: {file}\n{content}" for file, content in codebase_context.items()])
-        context_inputs = tokenizer(context_prompt, return_tensors="pt").to("cuda")
-        inputs = torch.cat([context_inputs.input_ids, inputs.input_ids], dim=1)
-    
-    while total_tokens < max_tokens:
-        # Speculate multiple tokens using the num_heads
-        with torch.no_grad():
-            outputs = model(input_ids=inputs.input_ids)
-            logits = outputs.logits[:, -num_heads:]
-        
-        # Get the predicted tokens for each head
-        predicted_tokens = torch.argmax(logits, dim=-1)
-        
-        # Find the first mismatch or use all predicted tokens if no mismatch
-        mismatch_index = (predicted_tokens[0] != inputs.input_ids[0, -num_heads:]).nonzero(as_tuple=True)[0]
-        
-        if len(mismatch_index) == 0:
-            # All speculated tokens are correct
-            generated_tokens.extend(predicted_tokens[0].tolist())
-            mismatch_index = num_heads
-        else:
-            mismatch_index = mismatch_index[0].item()
-            generated_tokens.extend(predicted_tokens[0, :mismatch_index].tolist())
-        
-        # Update input for next iteration
-        inputs = tokenizer(tokenizer.decode(inputs.input_ids[0]) + tokenizer.decode(predicted_tokens[0, :mismatch_index]), return_tensors="pt").to("cuda")
-        
-        total_tokens = len(generated_tokens)
-        
-        # Log the number of correct speculations
-        writer.add_scalar('Correct_Speculations', mismatch_index, total_tokens)
-        
-        if total_tokens >= max_tokens:
-            break
-    
-    return tokenizer.decode(generated_tokens[:max_tokens])
-
-def compare_methods(prompt: str, max_tokens: int) -> Tuple[str, str, float, float]:
-    """
-    Compare vanilla and speculative editing methods.
-
-    Args:
-        prompt (str): The input prompt for text generation.
-        max_tokens (int): Maximum number of tokens to generate.
-
-    Returns:
-        Tuple[str, str, float, float]: Vanilla output, speculative output, vanilla time, speculative time.
-    """
-    import time
-
-    start_time = time.time()
-    vanilla_output = vanilla_edit(prompt, max_tokens)
-    vanilla_time = time.time() - start_time
-
-    start_time = time.time()
-    speculative_output = speculative_edit(prompt, max_tokens)
-    speculative_time = time.time() - start_time
-
-    # Log the time differences
-    writer.add_scalar('Time_Difference', vanilla_time - speculative_time, max_tokens)
-
-    return vanilla_output, speculative_output, vanilla_time, speculative_time
-
-# Test the functions
-if __name__ == "__main__":
+    # Test prompt
     test_prompt = """Please add a single comment
 
     ```ts
@@ -158,7 +55,8 @@ if __name__ == "__main__":
 
     max_tokens = 100
 
-    vanilla_output, speculative_output, vanilla_time, speculative_time = compare_methods(test_prompt, max_tokens)
+    # Compare vanilla and speculative editing
+    vanilla_output, speculative_output, vanilla_time, speculative_time = compare_methods(model, tokenizer, test_prompt, max_tokens, writer)
 
     print(f"Vanilla Edit (Time: {vanilla_time:.4f}s):")
     print(vanilla_output)
@@ -168,5 +66,24 @@ if __name__ == "__main__":
 
     print(f"\nTime difference: {vanilla_time - speculative_time:.4f}s")
 
+    # Test next action prediction
+    next_action = predict_next_action(model, tokenizer, test_prompt)
+    print(f"\nPredicted next action: {next_action}")
+
+    # Test perfect edit
+    perfect_edit_result = perfect_edit(model, tokenizer, test_prompt, "Add a comment explaining the purpose of the Visualization function")
+    print(f"\nPerfect Edit result:\n{perfect_edit_result}")
+
+    # Test bug detection
+    bugs = detect_bugs(model, tokenizer, test_prompt)
+    print(f"\nDetected bugs:\n{bugs}")
+
+    # Test multi-hop context retrieval
+    context = retrieve_multi_hop_context(model, tokenizer, test_prompt, ["file1.ts", "file2.ts"])
+    print(f"\nRetrieved multi-hop context:\n{context}")
+
     # Close the TensorBoard writer
     writer.close()
+
+if __name__ == "__main__":
+    main()

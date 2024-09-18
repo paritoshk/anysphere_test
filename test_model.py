@@ -10,7 +10,7 @@ def test_model():
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
     # Test prompt
-    prompt = "Explain the concept of quantum computing in simple terms."
+    prompt = "Explain the concept of quantum computing in detailed applied physics terms. Assume the reader has a PhD level understanding of physics and mathematics."
     
     # Tokenize and generate
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
