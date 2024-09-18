@@ -11,6 +11,27 @@ from typing import List, Tuple, Dict
 def setup_tensorboard():
     return SummaryWriter()
 
+def compare_methods(model, tokenizer, prompt: str, max_tokens: int, writer) -> Tuple[str, str, float, float, float]:
+    import time
+    from difflib import SequenceMatcher
+
+    start_time = time.time()
+    vanilla_output = vanilla_edit(model, tokenizer, prompt, max_tokens)
+    vanilla_time = time.time() - start_time
+
+    start_time = time.time()
+    speculative_output, correct_speculations = speculative_edit(model, tokenizer, prompt, max_tokens)
+    speculative_time = time.time() - start_time
+
+    # Calculate similarity ratio
+    similarity = SequenceMatcher(None, vanilla_output, speculative_output).ratio()
+
+    writer.add_scalar('Time_Difference', vanilla_time - speculative_time, max_tokens)
+    writer.add_scalar('Output_Similarity', similarity, max_tokens)
+    writer.add_scalar('Correct_Speculations', correct_speculations, max_tokens)
+
+    return vanilla_output, speculative_output, vanilla_time, speculative_time, similarity
+
 def main():
     # Load model and tokenizer
     model_path = "/workspace/llama3finetune/model"
@@ -58,7 +79,7 @@ def main():
     max_tokens = 100
 
     # Compare vanilla and speculative editing
-    vanilla_output, speculative_output, vanilla_time, speculative_time = compare_methods(model, tokenizer, test_prompt, max_tokens, writer)
+    vanilla_output, speculative_output, vanilla_time, speculative_time, similarity = compare_methods(model, tokenizer, test_prompt, max_tokens, writer)
 
     print(f"Vanilla Edit (Time: {vanilla_time:.4f}s):")
     print(vanilla_output)
@@ -67,6 +88,7 @@ def main():
     print(speculative_output)
 
     print(f"\nTime difference: {vanilla_time - speculative_time:.4f}s")
+    print(f"Output similarity: {similarity:.4f}")
 
     # Test next action prediction
     next_action = predict_next_action(model, tokenizer, test_prompt)

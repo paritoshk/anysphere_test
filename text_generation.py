@@ -28,7 +28,7 @@ def vanilla_edit(model, tokenizer, prompt: str, max_tokens: int) -> str:
     generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
     return generated_text[len(prompt):]
 
-def speculative_edit(model, tokenizer, prompt: str, max_tokens: int, num_heads: int = 3, codebase_context: Dict[str, str] = None) -> str:
+def speculative_edit(model, tokenizer, prompt: str, max_tokens: int, num_heads: int = 3, codebase_context: Dict[str, str] = None) -> Tuple[str, int]:
     """
     Perform speculative text generation using multiple heads.
 
@@ -45,6 +45,7 @@ def speculative_edit(model, tokenizer, prompt: str, max_tokens: int, num_heads: 
     
     generated_tokens: List[int] = []
     total_tokens = 0
+    correct_speculations = 0
     
     if codebase_context:
         context_prompt = "\n".join([f"File: {file}\n{content}" for file, content in codebase_context.items()])
@@ -52,33 +53,32 @@ def speculative_edit(model, tokenizer, prompt: str, max_tokens: int, num_heads: 
         inputs.input_ids = torch.cat([context_inputs.input_ids, inputs.input_ids], dim=1)
         inputs.attention_mask = torch.cat([context_inputs.attention_mask, inputs.attention_mask], dim=1)
     
-    past_key_values = None
-    
     while total_tokens < max_tokens:
         with torch.no_grad():
-            outputs = model(input_ids=inputs.input_ids, attention_mask=inputs.attention_mask, past_key_values=past_key_values)
+            outputs = model(input_ids=inputs.input_ids, attention_mask=inputs.attention_mask)
             logits = outputs.logits[:, -num_heads:]
-            past_key_values = outputs.past_key_values
         
         predicted_tokens = torch.argmax(logits, dim=-1)
         mismatch_index = (predicted_tokens[0] != inputs.input_ids[0, -num_heads:]).nonzero(as_tuple=True)[0]
         
         if len(mismatch_index) == 0:
             generated_tokens.extend(predicted_tokens[0].tolist())
+            correct_speculations += num_heads
             mismatch_index = num_heads
         else:
             mismatch_index = mismatch_index[0].item()
             generated_tokens.extend(predicted_tokens[0, :mismatch_index].tolist())
+            correct_speculations += mismatch_index
         
         new_tokens = tokenizer.decode(predicted_tokens[0, :mismatch_index])
         inputs = tokenizer(tokenizer.decode(inputs.input_ids[0]) + new_tokens, return_tensors="pt", padding=True, return_attention_mask=True).to("cuda")
         
         total_tokens = len(generated_tokens)
         
-        if total_tokens >= max_tokens:
+        if total_tokens >= max_tokens or predicted_tokens[0, mismatch_index-1].item() == tokenizer.eos_token_id:
             break
     
-    return tokenizer.decode(generated_tokens[:max_tokens])
+    return tokenizer.decode(generated_tokens[:max_tokens]), correct_speculations
 
 def compare_methods(model, tokenizer, prompt: str, max_tokens: int, writer) -> Tuple[str, str, float, float]:
     import time
