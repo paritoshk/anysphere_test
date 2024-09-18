@@ -6,6 +6,7 @@ from perfect_edit import perfect_edit
 from bug_detection import detect_bugs
 from multi_hop_context import retrieve_multi_hop_context
 from torch.utils.tensorboard import SummaryWriter
+from typing import List, Tuple, Dict
 
 def setup_tensorboard():
     return SummaryWriter()
